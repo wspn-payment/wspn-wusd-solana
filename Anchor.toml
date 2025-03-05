@@ -5,8 +5,8 @@ anchor_version = "0.28.0"
 resolution = true
 skip-lint = false
 
-[programs.devnet] 
-wusd_token = "GfuHPYJknaCn8ygtxj6pS8bHo6NZ5dmPyRmn8J2nAYC5"
+[programs.devnet]
+wusd_token = "BMHPsUveRk85eU2LisMDZxrM6GxP42JMVxShM2NKt58i"
 
 [registry]
 url = "https://api.apr.dev"

@@ -42,4 +42,6 @@ pub enum WusdError {
     InvalidTransferFrom,
     #[msg("Invalid mint address")]
     InvalidMint, 
+    #[msg("Expired permit")]
+    ExpiredPermit,
 }
