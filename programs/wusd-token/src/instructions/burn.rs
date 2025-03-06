@@ -1,5 +1,6 @@
 use anchor_lang::prelude::*;
-use anchor_spl::token::{self, Token, TokenAccount, Mint}; 
+use anchor_spl::token_2022::Token2022;
+use anchor_spl::token_2022::{self, burn as token_burn};
 use crate::{AccessLevel, error::WusdError};
 use crate::state::{AuthorityState, MintState, AccessRegistryState, PauseState};
 
@@ -38,16 +39,16 @@ pub fn burn(ctx: Context<Burn>, amount: u64) -> Result<()> {
     );
 
     // 执行销毁操作
-    token::burn(
+    token_burn(
         CpiContext::new(
             ctx.accounts.token_program.to_account_info(),
-            token::Burn {
+            token_2022::Burn {
                 mint: ctx.accounts.mint.to_account_info(),
                 from: ctx.accounts.token_account.to_account_info(),
                 authority: ctx.accounts.authority.to_account_info(),
             },
         ),
-        amount,
+        amount
     )?;
 
     emit!(BurnEvent {
@@ -67,10 +68,10 @@ pub struct Burn<'info> {
     #[account(mut)]
     pub authority: Signer<'info>,
     #[account(mut)]
-    pub mint: Account<'info, Mint>,
+    pub mint: Box<Account<'info, anchor_spl::token::Mint>>,
     #[account(mut)]
-    pub token_account: Account<'info, TokenAccount>,
-    pub token_program: Program<'info, Token>, 
+    pub token_account: Box<Account<'info, anchor_spl::token::TokenAccount>>,
+    pub token_program: Program<'info, Token2022>, 
     pub mint_state: Account<'info, MintState>,
     pub pause_state: Account<'info, PauseState>,
     pub access_registry: Account<'info, AccessRegistryState>, 

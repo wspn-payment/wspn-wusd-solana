@@ -2,7 +2,8 @@ use crate::error::WusdError;
 use crate::state::{AccessRegistryState, FreezeState, MintState, PauseState, PermitState};
 use crate::utils::require_has_access;
 use anchor_lang::prelude::*;
-use anchor_spl::token::{self, Token, TokenAccount};
+use anchor_spl::token_2022::{self, transfer_checked, Token2022};
+use anchor_spl::token::TokenAccount;
 
 /// 转账WUSD代币
 /// * `ctx` - 转账上下文
@@ -12,8 +13,8 @@ pub fn transfer(ctx: Context<Transfer>, amount: u64) -> Result<()> {
     ctx.accounts.pause_state.validate_not_paused()?;
     require!(amount > 0, WusdError::InvalidAmount);
     // 检查冻结状态
-    ctx.accounts.from_freeze_state.check_frozen()?;
-    ctx.accounts.to_freeze_state.check_frozen()?;
+    require!(!ctx.accounts.from_token.is_frozen(), WusdError::AccountFrozen);
+    require!(!ctx.accounts.to_token.is_frozen(), WusdError::AccountFrozen);
 
     // 检查访问权限
     require_has_access(
@@ -25,16 +26,18 @@ pub fn transfer(ctx: Context<Transfer>, amount: u64) -> Result<()> {
     )?;
 
     // 执行转账
-    token::transfer(
+    transfer_checked(
         CpiContext::new(
             ctx.accounts.token_program.to_account_info(),
-            token::Transfer {
+            token_2022::TransferChecked {
                 from: ctx.accounts.from_token.to_account_info(),
+                mint: ctx.accounts.token_mint.to_account_info(),
                 to: ctx.accounts.to_token.to_account_info(),
                 authority: ctx.accounts.from.to_account_info(),
             },
         ),
         amount,
+        6, // 使用固定的小数位数
     )?;
 
     // 发送转账事件
@@ -79,8 +82,8 @@ pub fn transfer_from(ctx: Context<TransferFrom>, amount: u64) -> Result<()> {
     )?;
 
     // 检查冻结状态
-    ctx.accounts.from_freeze_state.check_frozen()?;
-    ctx.accounts.to_freeze_state.check_frozen()?;
+    require!(!ctx.accounts.from_token.is_frozen(), WusdError::AccountFrozen);
+    require!(!ctx.accounts.to_token.is_frozen(), WusdError::AccountFrozen);
 
     // 生成 PDA 签名
     let owner_key = ctx.accounts.owner.key();
@@ -93,17 +96,19 @@ pub fn transfer_from(ctx: Context<TransferFrom>, amount: u64) -> Result<()> {
     ];
 
     // 执行代币转账
-    token::transfer(
+    transfer_checked(
         CpiContext::new_with_signer(
             ctx.accounts.token_program.to_account_info(),
-            token::Transfer {
+            token_2022::TransferChecked {
                 from: ctx.accounts.from_token.to_account_info(),
+                mint: ctx.accounts.token_mint.to_account_info(),
                 to: ctx.accounts.to_token.to_account_info(),
                 authority: ctx.accounts.permit.to_account_info(),
             },
             &[&seeds[..]],
         ),
         amount,
+        6, // 使用固定的小数位数
     )?;
 
     // 更新授权额度
@@ -127,9 +132,9 @@ pub struct TransferFrom<'info> {
         mut,
         constraint = from_token.owner == owner.key()
     )]
-    pub from_token: Account<'info, TokenAccount>,
+    pub from_token: Box<Account<'info, anchor_spl::token::TokenAccount>>,
     #[account(mut)]
-    pub to_token: Account<'info, TokenAccount>,
+    pub to_token: Box<Account<'info, anchor_spl::token::TokenAccount>>,
     #[account(
         seeds = [
             b"permit",
@@ -145,7 +150,9 @@ pub struct TransferFrom<'info> {
     pub mint_state: Box<Account<'info, MintState>>,
     pub pause_state: Account<'info, PauseState>,
     pub access_registry: Account<'info, AccessRegistryState>,
-    pub token_program: Program<'info, Token>,
+    pub token_program: Program<'info, Token2022>,
+    #[account(mut)]
+    pub token_mint: Account<'info, anchor_spl::token::Mint>,
     #[account(
         seeds = [b"freeze", from_token.key().as_ref()],
         bump,
@@ -173,13 +180,15 @@ pub struct Transfer<'info> {
         constraint = from_token.owner == from.key() @ WusdError::InvalidOwner,
         constraint = from_token.mint == to_token.mint @ WusdError::InvalidMint
     )]
-    pub from_token: Account<'info, TokenAccount>,
+    pub from_token: Box<Account<'info, TokenAccount>>,
     #[account(
         mut,
         constraint = to_token.owner == to.key() @ WusdError::InvalidOwner
     )]
-    pub to_token: Account<'info, TokenAccount>,
-    pub token_program: Program<'info, Token>,
+    pub to_token: Box<Account<'info, TokenAccount>>,
+    pub token_program: Program<'info, Token2022>,
+    #[account(mut)]
+    pub token_mint: Account<'info, anchor_spl::token::Mint>,
     #[account(
         seeds = [b"pause_state", from_token.mint.as_ref()],
         bump,

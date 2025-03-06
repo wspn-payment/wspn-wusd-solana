@@ -1,5 +1,5 @@
 use anchor_lang::prelude::*;
-use anchor_spl::token::Token; 
+use anchor_spl::token_2022::Token2022; 
 use crate::error::WusdError;  
 use crate::state::{MintState, PermitState, AllowanceState};
 
@@ -87,7 +87,7 @@ pub struct Permit<'info> {
     #[account(mut)]
     pub mint_state: Box<Account<'info, MintState>>,
 
-    pub token_program: Program<'info, Token>,
+    pub token_program: Program<'info, Token2022>,
     pub system_program: Program<'info, System>,
     pub clock: Sysvar<'info, Clock>
 } 
@@ -137,4 +137,4 @@ impl PermitScope {
         burn: false,
         all: false
     };
-} 
+}

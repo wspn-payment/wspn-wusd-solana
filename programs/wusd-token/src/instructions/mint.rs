@@ -1,6 +1,7 @@
 use anchor_lang::prelude::*;
 use crate::error::WusdError;   
-use anchor_spl::token::{self, Token, TokenAccount};
+use anchor_spl::token_2022::Token2022;
+use anchor_spl::token_2022::{self, mint_to};
 use crate::utils::require_has_access;
 use crate::state::{AuthorityState, MintState, PauseState, AccessRegistryState};
 
@@ -22,17 +23,17 @@ pub fn mint(ctx: Context<MintAccounts>, amount: u64, bump: u8) -> Result<()> {
     // 执行铸币
     let mint_key = ctx.accounts.token_mint.key();
     let seeds = &[b"authority", mint_key.as_ref(), &[bump]];
-    token::mint_to(
+    mint_to(
         CpiContext::new_with_signer(
             ctx.accounts.token_program.to_account_info(),
-            token::MintTo {
+            token_2022::MintTo {
                 mint: ctx.accounts.token_mint.to_account_info(),
                 to: ctx.accounts.token_account.to_account_info(),
                 authority: ctx.accounts.authority_state.to_account_info(),
             },
             &[&seeds[..]],
         ),
-        amount,
+        amount
     )?;
 
     Ok(())
@@ -44,10 +45,10 @@ pub struct MintAccounts<'info> {
     #[account(mut)]
     pub authority: Signer<'info>,
     #[account(mut)]
-    pub token_mint: Account<'info, token::Mint>,
+    pub token_mint: Account<'info, anchor_spl::token::Mint>,
     #[account(mut)]
-    pub token_account: Account<'info, TokenAccount>,
-    pub token_program: Program<'info, Token>,
+    pub token_account: Account<'info, anchor_spl::token::TokenAccount>,
+    pub token_program: Program<'info, Token2022>,
     #[account(mut)]
     pub authority_state: Account<'info, AuthorityState>,
     #[account(mut)]

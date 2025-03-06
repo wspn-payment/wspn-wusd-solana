@@ -8,7 +8,7 @@ import {
 import * as anchor from "@coral-xyz/anchor";
 import { Program } from "@coral-xyz/anchor";
 import {
-  TOKEN_PROGRAM_ID,
+  TOKEN_2022_PROGRAM_ID,
   createAssociatedTokenAccountInstruction,
   getAccount,
 } from "@solana/spl-token";
@@ -102,7 +102,7 @@ describe("WUSD Token Test", () => {
             mintState: mintStatePda,
             pauseState: pauseStatePda,
             systemProgram: SystemProgram.programId,
-            tokenProgram: TOKEN_PROGRAM_ID,
+            tokenProgram: TOKEN_2022_PROGRAM_ID,
             rent: anchor.web3.SYSVAR_RENT_PUBKEY,
           })
           .transaction(); // 使用 .transaction() 而不是 .rpc()
@@ -237,7 +237,7 @@ describe("WUSD Token Test", () => {
   it("Create Recipient Token Account", async () => {
     try {
       // 获取关联代币账户地址
-      recipientTokenAccount = await anchor.utils.token.associatedAddress({
+      recipientTokenAccount = await anchor.utils.token.associatedAddress2022({
         mint: mintKeypair.publicKey,
         owner: recipientKeypair.publicKey,
       });
@@ -275,7 +275,7 @@ describe("WUSD Token Test", () => {
           authority: provider.wallet.publicKey,
           tokenMint: mintKeypair.publicKey,
           tokenAccount: recipientTokenAccount,
-          tokenProgram: TOKEN_PROGRAM_ID,
+          tokenProgram: TOKEN_2022_PROGRAM_ID,
           authorityState: authorityPda,
           mintState: mintStatePda,
           pauseState: pauseStatePda,
@@ -354,7 +354,7 @@ describe("WUSD Token Test", () => {
       // 创建新的接收账户
       const newRecipient = Keypair.generate();
       const newRecipientTokenAccount =
-        await anchor.utils.token.associatedAddress({
+        await anchor.utils.token.associatedAddress2022({
           mint: mintKeypair.publicKey,
           owner: newRecipient.publicKey,
         });
@@ -456,7 +456,7 @@ describe("WUSD Token Test", () => {
           to: newRecipient.publicKey,
           fromToken: recipientTokenAccount,
           toToken: newRecipientTokenAccount,
-          tokenProgram: TOKEN_PROGRAM_ID,
+          tokenProgram: TOKEN_2022_PROGRAM_ID,
           pauseState: pauseStatePda,
           accessRegistry: accessRegistryPda,
           fromFreezeState: fromFreezeState,
@@ -566,7 +566,7 @@ describe("WUSD Token Test", () => {
       // 创建新的接收账户
       const newRecipient = Keypair.generate();
       const newRecipientTokenAccount =
-        await anchor.utils.token.associatedAddress({
+        await anchor.utils.token.associatedAddress2022({
           mint: mintKeypair.publicKey,
           owner: newRecipient.publicKey,
         });
@@ -699,7 +699,7 @@ describe("WUSD Token Test", () => {
           to: newRecipient.publicKey,
           fromToken: recipientTokenAccount,
           toToken: newRecipientTokenAccount,
-          tokenProgram: TOKEN_PROGRAM_ID,
+          tokenProgram: TOKEN_2022_PROGRAM_ID,
           pauseState: pauseStatePda,
           accessRegistry: accessRegistryPda,
           fromFreezeState: fromFreezeState,
@@ -773,7 +773,7 @@ describe("WUSD Token Test", () => {
           authority: recipientKeypair.publicKey,
           mint: mintKeypair.publicKey,
           tokenAccount: recipientTokenAccount,
-          tokenProgram: TOKEN_PROGRAM_ID,
+          tokenProgram: TOKEN_2022_PROGRAM_ID,
           mintState: mintStatePda,
           pauseState: pauseStatePda,
           accessRegistry: accessRegistryPda,

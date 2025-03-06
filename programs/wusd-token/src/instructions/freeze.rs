@@ -1,6 +1,8 @@
 use anchor_lang::prelude::*; 
 use crate::error::WusdError;   
-use crate::state::{FreezeState, AuthorityState};   
+use crate::state::{FreezeState, AuthorityState};
+use anchor_spl::token::TokenAccount;
+use anchor_spl::token_interface::Token2022;
 
 pub fn initialize_freeze_state(ctx: Context<InitializeFreezeState>) -> Result<()> {
     ctx.accounts.freeze_state.is_frozen = false;
@@ -72,9 +74,10 @@ pub struct InitializeFreezeState<'info> {
     )]
     pub freeze_state: Account<'info, FreezeState>,
     /// CHECK: Token account being frozen/unfrozen
-    pub token_account: AccountInfo<'info>,
+    pub token_account: Account<'info, TokenAccount>,
     #[account(mut)]
     pub payer: Signer<'info>,
+    pub token_program: Program<'info, Token2022>,
     pub system_program: Program<'info, System>,
 }
 
@@ -99,6 +102,7 @@ pub struct FreezeAccount<'info> {
 
     pub authority_state: Account<'info, AuthorityState>,
 
+    pub token_program: Program<'info, Token2022>,
     pub system_program: Program<'info, System>,
 }
 
