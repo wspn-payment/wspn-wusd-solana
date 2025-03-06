@@ -1,14 +1,11 @@
-//! WUSD Token 程序
-//! 
-//! 这是一个基于Solana区块链的稳定币智能合约，实现了以下主要功能：
-//! - 代币的铸造与销毁
-//! - 代币转账与余额管理
-//! - 授权和委托转账
-//! - 权限管理和访问控制
-//! - 暂停/恢复机制
-//! - EIP-2612兼容的签名许可
+//! WUSD Token 程序 
 use anchor_lang::prelude::*;
-use anchor_spl::token::{self, Token, Mint}; 
+use anchor_spl::token_2022;
+use anchor_spl::token_interface::Token2022;
+use anchor_spl::token::Mint;
+use spl_token_2022::instruction::AuthorityType;  
+use anchor_spl::token_2022::ID as TOKEN_2022_PROGRAM_ID;
+
 
 mod instructions; 
 mod error;
@@ -63,15 +60,15 @@ pub mod wusd_token {
         let (_authority_pda, bump) = Pubkey::find_program_address(seeds, ctx.program_id);
         let _bump_bytes = &[bump];
 
-        token::set_authority(
+        token_2022::set_authority(
             CpiContext::new(
                 ctx.accounts.token_program.to_account_info(),
-                token::SetAuthority {
+                token_2022::SetAuthority {
                     current_authority: ctx.accounts.authority.to_account_info(),
                     account_or_mint: ctx.accounts.token_mint.to_account_info(),
                 }
             ),
-            token::spl_token::instruction::AuthorityType::MintTokens,
+            AuthorityType::MintTokens,
             Some(ctx.accounts.authority_state.key()),
         )?;
 
@@ -169,7 +166,8 @@ pub struct Initialize<'info> {
         init,
         payer = authority,
         mint::decimals = decimals,
-        mint::authority = authority.key()
+        mint::authority = authority.key(),
+        owner = TOKEN_2022_PROGRAM_ID
     )]
     pub token_mint: Account<'info, Mint>,
 
@@ -193,7 +191,7 @@ pub struct Initialize<'info> {
     )]
     pub pause_state: Account<'info, PauseState>,
     pub system_program: Program<'info, System>,
-    pub token_program: Program<'info, Token>,
+    pub token_program: Program<'info, Token2022>,
     pub rent: Sysvar<'info, Rent>,
 }   
 

@@ -9,8 +9,8 @@ import * as anchor from "@coral-xyz/anchor";
 import { Program } from "@coral-xyz/anchor";
 import {
   TOKEN_2022_PROGRAM_ID,
-  createAssociatedTokenAccountInstruction,
-  getAccount,
+  createInitializeMint2Instruction,
+  createAssociatedTokenAccount2022Instruction
 } from "@solana/spl-token";
 import { WusdToken } from "../target/types/wusd_token";
 import { assert } from "chai";
@@ -92,8 +92,59 @@ describe("WUSD Token Test", () => {
         console.log("Pause State PDA:", pauseStatePda.toString());
         console.log("Access Registry PDA:", accessRegistryPda.toString());
 
-        // 创建交易指令
-        const tx = await program.methods
+        // 获取租金豁免金额 - Token2022的Mint账户需要更多空间用于扩展功能
+        // Mint账户基础大小为82字节，加上额外空间用于可能的扩展
+        // 根据Token2022文档，需要为账户类型预留1字节，为扩展预留足够空间
+        const mintSize = 82 + 1 + 83; // 82字节基础大小 + 1字节账户类型 + 83字节用于扩展
+        const rentExemptAmount = await provider.connection.getMinimumBalanceForRentExemption(mintSize);
+
+        // 创建铸币账户空间
+        const createAccountIx = SystemProgram.createAccount({
+          fromPubkey: provider.wallet.publicKey,
+          newAccountPubkey: mintKeypair.publicKey,
+          space: mintSize,
+          lamports: rentExemptAmount,
+          programId: TOKEN_2022_PROGRAM_ID,
+        });
+
+        // 添加Token2022铸币初始化指令
+        const createMintIx = createInitializeMint2Instruction(
+          mintKeypair.publicKey,
+          6,
+          authorityPda,
+          authorityPda,
+          TOKEN_2022_PROGRAM_ID
+        );
+
+        // 创建初始化交易
+        const mintTx = new anchor.web3.Transaction()
+          .add(createAccountIx)
+          .add(createMintIx);
+
+        // 获取最新的区块哈希
+        const latestBlockhash = await provider.connection.getLatestBlockhash();
+        mintTx.recentBlockhash = latestBlockhash.blockhash;
+        mintTx.feePayer = provider.wallet.publicKey;
+
+        // 添加签名者
+        const mintTxSigned = await provider.wallet.signTransaction(mintTx);
+        mintTxSigned.partialSign(mintKeypair);
+
+        // 发送交易
+        const mintSignature = await provider.connection.sendRawTransaction(
+          mintTxSigned.serialize(),
+          {
+            skipPreflight: false,
+            preflightCommitment: "confirmed",
+          }
+        );
+        await provider.connection.confirmTransaction(mintSignature, "confirmed");
+
+        // 等待一段时间确保账户创建完成
+        await new Promise(resolve => setTimeout(resolve, 2000));
+
+        // 初始化合约状态
+        const initTx = await program.methods
           .initialize(6)
           .accounts({
             authority: provider.wallet.publicKey,
@@ -105,26 +156,10 @@ describe("WUSD Token Test", () => {
             tokenProgram: TOKEN_2022_PROGRAM_ID,
             rent: anchor.web3.SYSVAR_RENT_PUBKEY,
           })
-          .transaction(); // 使用 .transaction() 而不是 .rpc()
+          .signers([mintKeypair])
+          .rpc();
 
-        // 获取最新的区块哈希
-        const latestBlockhash = await provider.connection.getLatestBlockhash();
-        tx.recentBlockhash = latestBlockhash.blockhash;
-        tx.feePayer = provider.wallet.publicKey;
-
-        // 添加签名者
-        const txSigned = await provider.wallet.signTransaction(tx);
-        txSigned.partialSign(mintKeypair);
-
-        // 发送交易
-        const signature = await provider.connection.sendRawTransaction(
-          txSigned.serialize(),
-          {
-            skipPreflight: false,
-            preflightCommitment: "confirmed",
-          }
-        );
-        await provider.connection.confirmTransaction(signature, "confirmed");
+        await provider.connection.confirmTransaction(initTx, "confirmed");
 
         console.log("Contract state initialized");
       } catch (error) {
@@ -242,11 +277,12 @@ describe("WUSD Token Test", () => {
         owner: recipientKeypair.publicKey,
       });
 
-      const createTokenAccountIx = createAssociatedTokenAccountInstruction(
+      const createTokenAccountIx = createAssociatedTokenAccount2022Instruction(
         provider.wallet.publicKey,
         recipientTokenAccount,
         recipientKeypair.publicKey,
-        mintKeypair.publicKey
+        mintKeypair.publicKey,
+        TOKEN_2022_PROGRAM_ID
       );
 
       const tx = new anchor.web3.Transaction().add(createTokenAccountIx);
@@ -360,7 +396,7 @@ describe("WUSD Token Test", () => {
         });
 
       // 创建接收账户的代币账户
-      const createTokenAccountIx = createAssociatedTokenAccountInstruction(
+      const createTokenAccountIx = createAssociatedTokenAccount2022Instruction(
         provider.wallet.publicKey,
         newRecipientTokenAccount,
         newRecipient.publicKey,
@@ -572,7 +608,7 @@ describe("WUSD Token Test", () => {
         });
 
       // 创建接收账户的代币账户
-      const createTokenAccountIx = createAssociatedTokenAccountInstruction(
+      const createTokenAccountIx = createAssociatedTokenAccount2022Instruction(
         provider.wallet.publicKey,
         newRecipientTokenAccount,
         newRecipient.publicKey,
@@ -610,8 +646,10 @@ describe("WUSD Token Test", () => {
       });
 
       // 由于测试环境限制，我们将跳过permit和transfer_from测试的复杂部分
-      console.log("Simplifying transfer_from test due to test environment limitations");
-      
+      console.log(
+        "Simplifying transfer_from test due to test environment limitations"
+      );
+
       // 正确派生 freeze state PDAs
       const [fromFreezeState] = PublicKey.findProgramAddressSync(
         [Buffer.from("freeze"), recipientTokenAccount.toBuffer()],
@@ -678,9 +716,11 @@ describe("WUSD Token Test", () => {
         await provider.connection.confirmTransaction(initToFreezeStateTx);
         console.log("Initialized to freeze state");
       }
-      
+
       // 使用普通transfer代替transfer_from进行测试
-      console.log("Using regular transfer instead of transfer_from for testing");
+      console.log(
+        "Using regular transfer instead of transfer_from for testing"
+      );
       // 添加余额检查
       const beforeBalance = await provider.connection.getTokenAccountBalance(
         recipientTokenAccount
@@ -689,7 +729,7 @@ describe("WUSD Token Test", () => {
         "Before transfer_from balance:",
         beforeBalance.value.uiAmount
       );
-      
+
       // 执行转账操作
       const transferAmount = new anchor.BN(5000000); // 5 WUSD
       const transferTx = await program.methods
@@ -709,7 +749,7 @@ describe("WUSD Token Test", () => {
         .rpc();
 
       await provider.connection.confirmTransaction(transferTx, "confirmed");
-      console.log("Transfer successful as a substitute for transfer_from"); 
+      console.log("Transfer successful as a substitute for transfer_from");
 
       // 执行转账
       await provider.connection.confirmTransaction(transferTx);
