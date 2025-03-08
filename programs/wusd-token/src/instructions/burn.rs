@@ -1,7 +1,8 @@
 use anchor_lang::prelude::*;
 use anchor_spl::token_2022::Token2022;
 use anchor_spl::token_2022::{self, burn as token_burn};
-use crate::{AccessLevel, error::WusdError};
+use crate::access::AccessLevel;
+use crate::error::WusdError;
 use crate::state::{AuthorityState, MintState, AccessRegistryState, PauseState};
 
 /// 销毁WUSD代币
@@ -68,9 +69,9 @@ pub struct Burn<'info> {
     #[account(mut)]
     pub authority: Signer<'info>,
     #[account(mut)]
-    pub mint: Box<Account<'info, anchor_spl::token::Mint>>,
+    pub mint: Box<InterfaceAccount<'info, anchor_spl::token_interface::Mint>>,
     #[account(mut)]
-    pub token_account: Box<Account<'info, anchor_spl::token::TokenAccount>>,
+    pub token_account: Box<InterfaceAccount<'info, anchor_spl::token_interface::TokenAccount>>,
     pub token_program: Program<'info, Token2022>, 
     pub mint_state: Account<'info, MintState>,
     pub pause_state: Account<'info, PauseState>,

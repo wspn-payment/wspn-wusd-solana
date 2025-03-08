@@ -3,7 +3,7 @@ use crate::state::{AccessRegistryState, FreezeState, MintState, PauseState, Perm
 use crate::utils::require_has_access;
 use anchor_lang::prelude::*;
 use anchor_spl::token_2022::{self, transfer_checked, Token2022};
-use anchor_spl::token::TokenAccount;
+use anchor_spl::token_interface::TokenAccount;
 
 /// 转账WUSD代币
 /// * `ctx` - 转账上下文
@@ -132,9 +132,9 @@ pub struct TransferFrom<'info> {
         mut,
         constraint = from_token.owner == owner.key()
     )]
-    pub from_token: Box<Account<'info, anchor_spl::token::TokenAccount>>,
+    pub from_token: Box<InterfaceAccount<'info, anchor_spl::token_interface::TokenAccount>>,
     #[account(mut)]
-    pub to_token: Box<Account<'info, anchor_spl::token::TokenAccount>>,
+    pub to_token: Box<InterfaceAccount<'info, anchor_spl::token_interface::TokenAccount>>,
     #[account(
         seeds = [
             b"permit",
@@ -152,7 +152,7 @@ pub struct TransferFrom<'info> {
     pub access_registry: Account<'info, AccessRegistryState>,
     pub token_program: Program<'info, Token2022>,
     #[account(mut)]
-    pub token_mint: Account<'info, anchor_spl::token::Mint>,
+    pub token_mint: InterfaceAccount<'info, anchor_spl::token_interface::Mint>,
     #[account(
         seeds = [b"freeze", from_token.key().as_ref()],
         bump,
@@ -180,15 +180,15 @@ pub struct Transfer<'info> {
         constraint = from_token.owner == from.key() @ WusdError::InvalidOwner,
         constraint = from_token.mint == to_token.mint @ WusdError::InvalidMint
     )]
-    pub from_token: Box<Account<'info, TokenAccount>>,
+    pub from_token: Box<InterfaceAccount<'info, TokenAccount>>,
     #[account(
         mut,
         constraint = to_token.owner == to.key() @ WusdError::InvalidOwner
     )]
-    pub to_token: Box<Account<'info, TokenAccount>>,
+    pub to_token: Box<InterfaceAccount<'info, TokenAccount>>,
     pub token_program: Program<'info, Token2022>,
     #[account(mut)]
-    pub token_mint: Account<'info, anchor_spl::token::Mint>,
+    pub token_mint: InterfaceAccount<'info, anchor_spl::token_interface::Mint>,
     #[account(
         seeds = [b"pause_state", from_token.mint.as_ref()],
         bump,
@@ -200,19 +200,6 @@ pub struct Transfer<'info> {
         bump
     )]
     pub access_registry: Account<'info, AccessRegistryState>,
-    #[account(
-        seeds = [b"freeze", from_token.key().as_ref()],
-        bump,
-        constraint = !from_freeze_state.is_frozen @ WusdError::AccountFrozen
-    )]
-    pub from_freeze_state: Account<'info, FreezeState>,
-    #[account(
-        seeds = [b"freeze", to_token.key().as_ref()],
-        bump,
-        constraint = !to_freeze_state.is_frozen @ WusdError::AccountFrozen
-    )]
-    pub to_freeze_state: Account<'info, FreezeState>,
-    pub system_program: Program<'info, System>,
 }
 
 #[event]

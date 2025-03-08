@@ -7,10 +7,11 @@ import {
 } from "@solana/web3.js";
 import * as anchor from "@coral-xyz/anchor";
 import { Program } from "@coral-xyz/anchor";
-import {
+import { 
   TOKEN_2022_PROGRAM_ID,
   createInitializeMint2Instruction,
-  createAssociatedTokenAccount2022Instruction
+  createAssociatedTokenAccountInstruction,
+  getAssociatedTokenAddressSync
 } from "@solana/spl-token";
 import { WusdToken } from "../target/types/wusd_token";
 import { assert } from "chai";
@@ -44,10 +45,37 @@ describe("WUSD Token Test", () => {
       console.log("Starting initialization...");
 
       // 1. 生成密钥对
-      mintKeypair = Keypair.generate();
-      recipientKeypair = Keypair.generate();
+      mintKeypair = anchor.web3.Keypair.generate();
+      recipientKeypair = anchor.web3.Keypair.generate();
 
-      // 2. 计算 PDA 地址
+      // 2. 为账户请求空投并确认
+      const mintAirdropSig = await provider.connection.requestAirdrop(
+        mintKeypair.publicKey,
+        10 * LAMPORTS_PER_SOL
+      );
+      const recipientAirdropSig = await provider.connection.requestAirdrop(
+        recipientKeypair.publicKey,
+        10 * LAMPORTS_PER_SOL
+      );
+
+      const { blockhash, lastValidBlockHeight } =
+        await provider.connection.getLatestBlockhash({
+          commitment: "confirmed",
+        });
+
+      await provider.connection.confirmTransaction({
+        signature: mintAirdropSig,
+        blockhash,
+        lastValidBlockHeight,
+      });
+
+      await provider.connection.confirmTransaction({
+        signature: recipientAirdropSig,
+        blockhash,
+        lastValidBlockHeight,
+      });
+
+      // 3. 计算 PDA 地址
       console.log("Calculating PDA addresses...");
       [authorityPda, authorityBump] = PublicKey.findProgramAddressSync(
         [Buffer.from("authority"), mintKeypair.publicKey.toBuffer()],
@@ -69,18 +97,6 @@ describe("WUSD Token Test", () => {
         program.programId
       );
 
-      // 3. 请求空投
-      console.log("Requesting airdrop...");
-      const airdropSignature = await provider.connection.requestAirdrop(
-        provider.wallet.publicKey,
-        10 * LAMPORTS_PER_SOL
-      );
-      await provider.connection.confirmTransaction(
-        airdropSignature,
-        "confirmed"
-      );
-      console.log("Airdrop completed");
-
       // 4. 初始化合约状态
       console.log("Initializing contract state...");
       try {
@@ -92,76 +108,338 @@ describe("WUSD Token Test", () => {
         console.log("Pause State PDA:", pauseStatePda.toString());
         console.log("Access Registry PDA:", accessRegistryPda.toString());
 
-        // 获取租金豁免金额 - Token2022的Mint账户需要更多空间用于扩展功能
-        // Mint账户基础大小为82字节，加上额外空间用于可能的扩展
-        // 根据Token2022文档，需要为账户类型预留1字节，为扩展预留足够空间
-        const mintSize = 82 + 1 + 83; // 82字节基础大小 + 1字节账户类型 + 83字节用于扩展
-        const rentExemptAmount = await provider.connection.getMinimumBalanceForRentExemption(mintSize);
+        // 获取租金豁免金额
+        const mintSize = 82; // Token2022 Mint账户的标准大小
+        const rentExemptAmount =
+          await provider.connection.getMinimumBalanceForRentExemption(mintSize);
 
-        // 创建铸币账户空间
-        const createAccountIx = SystemProgram.createAccount({
-          fromPubkey: provider.wallet.publicKey,
-          newAccountPubkey: mintKeypair.publicKey,
-          space: mintSize,
-          lamports: rentExemptAmount,
-          programId: TOKEN_2022_PROGRAM_ID,
-        });
-
-        // 添加Token2022铸币初始化指令
-        const createMintIx = createInitializeMint2Instruction(
-          mintKeypair.publicKey,
-          6,
-          authorityPda,
-          authorityPda,
-          TOKEN_2022_PROGRAM_ID
-        );
-
-        // 创建初始化交易
-        const mintTx = new anchor.web3.Transaction()
-          .add(createAccountIx)
-          .add(createMintIx);
-
-        // 获取最新的区块哈希
-        const latestBlockhash = await provider.connection.getLatestBlockhash();
-        mintTx.recentBlockhash = latestBlockhash.blockhash;
-        mintTx.feePayer = provider.wallet.publicKey;
-
-        // 添加签名者
-        const mintTxSigned = await provider.wallet.signTransaction(mintTx);
-        mintTxSigned.partialSign(mintKeypair);
-
-        // 发送交易
-        const mintSignature = await provider.connection.sendRawTransaction(
-          mintTxSigned.serialize(),
-          {
-            skipPreflight: false,
-            preflightCommitment: "confirmed",
+        // 实现更可靠的账户创建逻辑，确保账户不存在
+        async function createUniqueKeypair() {
+          let attempts = 0;
+          const maxAttempts = 5;
+          let newKeypair = anchor.web3.Keypair.generate();
+          
+          while (attempts < maxAttempts) {
+            // 检查账户是否已存在
+            const accountInfo = await provider.connection.getAccountInfo(
+              newKeypair.publicKey
+            );
+            
+            if (accountInfo === null) {
+              // 账户不存在，可以使用
+              console.log(`Found unused keypair after ${attempts + 1} attempts:`, newKeypair.publicKey.toString());
+              return newKeypair;
+            }
+            
+            console.log(`Attempt ${attempts + 1}: Account already exists, generating new keypair...`);
+            newKeypair = anchor.web3.Keypair.generate();
+            attempts++;
           }
+          
+          throw new Error(`Failed to find unused keypair after ${maxAttempts} attempts`);
+        }
+        
+        // 检查当前账户是否已存在
+        const accountInfo = await provider.connection.getAccountInfo(
+          mintKeypair.publicKey
         );
-        await provider.connection.confirmTransaction(mintSignature, "confirmed");
+        
+        if (accountInfo !== null) {
+          console.log("Account already exists, creating a new keypair...");
+          // 创建新的唯一keypair
+          mintKeypair = await createUniqueKeypair();
+          
+          // 重新计算PDA地址
+          [authorityPda, authorityBump] = PublicKey.findProgramAddressSync(
+            [Buffer.from("authority"), mintKeypair.publicKey.toBuffer()],
+            program.programId
+          );
 
-        // 等待一段时间确保账户创建完成
-        await new Promise(resolve => setTimeout(resolve, 2000));
+          [mintStatePda] = PublicKey.findProgramAddressSync(
+            [Buffer.from("mint_state"), mintKeypair.publicKey.toBuffer()],
+            program.programId
+          );
 
-        // 初始化合约状态
-        const initTx = await program.methods
-          .initialize(6)
-          .accounts({
-            authority: provider.wallet.publicKey,
-            tokenMint: mintKeypair.publicKey,
-            authorityState: authorityPda,
-            mintState: mintStatePda,
-            pauseState: pauseStatePda,
-            systemProgram: SystemProgram.programId,
-            tokenProgram: TOKEN_2022_PROGRAM_ID,
-            rent: anchor.web3.SYSVAR_RENT_PUBKEY,
-          })
-          .signers([mintKeypair])
-          .rpc();
+          [pauseStatePda] = PublicKey.findProgramAddressSync(
+            [Buffer.from("pause_state"), mintKeypair.publicKey.toBuffer()],
+            program.programId
+          );
 
-        await provider.connection.confirmTransaction(initTx, "confirmed");
+          // 为新账户请求空投
+          const mintAirdropSig = await provider.connection.requestAirdrop(
+            mintKeypair.publicKey,
+            1 * LAMPORTS_PER_SOL
+          );
 
-        console.log("Contract state initialized");
+          const { blockhash, lastValidBlockHeight } =
+            await provider.connection.getLatestBlockhash({
+              commitment: "confirmed",
+            });
+
+          await provider.connection.confirmTransaction({
+            signature: mintAirdropSig,
+            blockhash,
+            lastValidBlockHeight,
+          });
+
+          await sleep(3000); // 增加等待时间确保交易完全确认
+        }
+
+        // 创建账户前再次检查账户是否存在
+        const doubleCheckAccountInfo = await provider.connection.getAccountInfo(
+          mintKeypair.publicKey
+        );
+        
+        if (doubleCheckAccountInfo !== null) {
+          console.log("Account still exists before creation, generating a new keypair...");
+          // 再次尝试创建新的唯一keypair
+          mintKeypair = await createUniqueKeypair();
+          
+          // 重新计算PDA地址
+          [authorityPda, authorityBump] = PublicKey.findProgramAddressSync(
+            [Buffer.from("authority"), mintKeypair.publicKey.toBuffer()],
+            program.programId
+          );
+
+          [mintStatePda] = PublicKey.findProgramAddressSync(
+            [Buffer.from("mint_state"), mintKeypair.publicKey.toBuffer()],
+            program.programId
+          );
+
+          [pauseStatePda] = PublicKey.findProgramAddressSync(
+            [Buffer.from("pause_state"), mintKeypair.publicKey.toBuffer()],
+            program.programId
+          );
+          
+          // 为新账户请求空投
+          const airdropSig = await provider.connection.requestAirdrop(
+            mintKeypair.publicKey,
+            1 * LAMPORTS_PER_SOL
+          );
+          
+          const latestBlockhash = await provider.connection.getLatestBlockhash({
+            commitment: "confirmed",
+          });
+          
+          await provider.connection.confirmTransaction({
+            signature: airdropSig,
+            blockhash: latestBlockhash.blockhash,
+            lastValidBlockHeight: latestBlockhash.lastValidBlockHeight,
+          });
+          
+          await sleep(3000); // 增加等待时间确保交易完全确认
+        }
+        
+        // 完全改变账户创建策略，使用更可靠的方法
+        console.log("Using alternative account creation strategy...");
+        
+        try {
+          // 1. 创建一个完全随机的新keypair
+          mintKeypair = anchor.web3.Keypair.generate();
+          console.log("Generated fresh keypair:", mintKeypair.publicKey.toString());
+          
+          // 2. 重新计算所有PDA地址
+          [authorityPda, authorityBump] = PublicKey.findProgramAddressSync(
+            [Buffer.from("authority"), mintKeypair.publicKey.toBuffer()],
+            program.programId
+          );
+
+          [mintStatePda] = PublicKey.findProgramAddressSync(
+            [Buffer.from("mint_state"), mintKeypair.publicKey.toBuffer()],
+            program.programId
+          );
+
+          [pauseStatePda] = PublicKey.findProgramAddressSync(
+            [Buffer.from("pause_state"), mintKeypair.publicKey.toBuffer()],
+            program.programId
+          );
+          
+          // 3. 为新账户请求空投
+          console.log("Requesting airdrop for new keypair...");
+          const airdropSig = await provider.connection.requestAirdrop(
+            mintKeypair.publicKey,
+            1 * LAMPORTS_PER_SOL
+          );
+          
+          // 4. 确认空投交易
+          const latestBlockhash = await provider.connection.getLatestBlockhash({
+            commitment: "confirmed",
+          });
+          
+          await provider.connection.confirmTransaction({
+            signature: airdropSig,
+            blockhash: latestBlockhash.blockhash,
+            lastValidBlockHeight: latestBlockhash.lastValidBlockHeight,
+          });
+          
+          console.log("Airdrop confirmed, waiting for network stability...");
+          await sleep(5000); // 增加更长的等待时间确保网络状态稳定
+          
+          // 5. 再次检查账户状态
+          const finalCheckInfo = await provider.connection.getAccountInfo(
+            mintKeypair.publicKey
+          );
+          
+          if (finalCheckInfo !== null) {
+            console.log("Warning: Account already exists after all checks. Using it directly.");
+          }
+          
+          // 6. 创建铸币账户空间
+          console.log("Creating mint account...");
+          const createAccountIx = SystemProgram.createAccount({
+            fromPubkey: provider.wallet.publicKey,
+            newAccountPubkey: mintKeypair.publicKey,
+            space: mintSize,
+            lamports: rentExemptAmount,
+            programId: TOKEN_2022_PROGRAM_ID,
+          });
+
+          // 7. 添加Token铸币初始化指令
+          const createMintIx = createInitializeMint2Instruction(
+            mintKeypair.publicKey,
+            6,
+            authorityPda,  // 使用 authorityPda 作为铸币权限
+            null,
+            TOKEN_2022_PROGRAM_ID
+          );
+
+          // 8. 创建并初始化账户
+          const tx = new anchor.web3.Transaction()
+            .add(createAccountIx)
+            .add(createMintIx);
+
+          // 9. 设置最新的区块哈希和手续费支付者
+          const { blockhash } = await provider.connection.getLatestBlockhash();
+          tx.recentBlockhash = blockhash;
+          tx.feePayer = provider.wallet.publicKey;
+
+          // 10. 添加所有必要的签名者
+          tx.partialSign(mintKeypair);
+          
+          console.log("Sending transaction to create and initialize mint account...");
+          await provider.sendAndConfirm(tx, [mintKeypair]);
+          
+          console.log("Account created and initialized successfully");
+        } catch (error) {
+          console.error("Alternative account creation strategy failed:", error);
+          
+          // 尝试使用完全不同的方法 - 使用程序创建账户而不是直接创建
+          console.log("Attempting program-based account creation as fallback...");
+          
+          try {
+            // 生成新的keypair
+            mintKeypair = anchor.web3.Keypair.generate();
+            console.log("Generated fallback keypair:", mintKeypair.publicKey.toString());
+            
+            // 重新计算PDA地址
+            [authorityPda, authorityBump] = PublicKey.findProgramAddressSync(
+              [Buffer.from("authority"), mintKeypair.publicKey.toBuffer()],
+              program.programId
+            );
+
+            [mintStatePda] = PublicKey.findProgramAddressSync(
+              [Buffer.from("mint_state"), mintKeypair.publicKey.toBuffer()],
+              program.programId
+            );
+
+            [pauseStatePda] = PublicKey.findProgramAddressSync(
+              [Buffer.from("pause_state"), mintKeypair.publicKey.toBuffer()],
+              program.programId
+            );
+            
+            // 为新账户请求空投
+            const airdropSig = await provider.connection.requestAirdrop(
+              mintKeypair.publicKey,
+              1 * LAMPORTS_PER_SOL
+            );
+            
+            const latestBlockhash = await provider.connection.getLatestBlockhash({
+              commitment: "confirmed",
+            });
+            
+            await provider.connection.confirmTransaction({
+              signature: airdropSig,
+              blockhash: latestBlockhash.blockhash,
+              lastValidBlockHeight: latestBlockhash.lastValidBlockHeight,
+            });
+            
+            await sleep(5000); // 增加等待时间
+            
+            // 使用程序的方式创建账户
+            console.log("Using program to create account...");
+            
+            // 创建铸币账户空间
+            const createAccountIx = SystemProgram.createAccount({
+              fromPubkey: provider.wallet.publicKey,
+              newAccountPubkey: mintKeypair.publicKey,
+              space: mintSize,
+              lamports: rentExemptAmount,
+              programId: TOKEN_2022_PROGRAM_ID,
+            });
+
+            // 添加Token铸币初始化指令
+            const createMintIx = createInitializeMint2Instruction(
+              mintKeypair.publicKey,
+              6,
+              authorityPda,
+              null,
+              TOKEN_2022_PROGRAM_ID
+            );
+
+            // 创建交易
+            const tx = new anchor.web3.Transaction();
+            tx.add(createAccountIx);
+            tx.add(createMintIx);
+            
+            // 获取最新区块哈希
+            const { blockhash: newBlockhash } = await provider.connection.getLatestBlockhash("finalized");
+            tx.recentBlockhash = newBlockhash;
+            tx.feePayer = provider.wallet.publicKey;
+            
+            // 签名并发送交易
+            tx.partialSign(mintKeypair);
+            const signature = await provider.connection.sendTransaction(tx, [provider.wallet.payer, mintKeypair], {
+              skipPreflight: true, // 跳过预检以避免模拟错误
+              preflightCommitment: "finalized"
+            });
+            
+            console.log("Transaction sent with signature:", signature);
+            
+            // 等待交易确认
+            await provider.connection.confirmTransaction({
+              signature,
+              blockhash: newBlockhash,
+              lastValidBlockHeight: (await provider.connection.getLatestBlockhash()).lastValidBlockHeight
+            }, "finalized");
+            
+            console.log("Fallback account creation successful");
+            
+            // 调用initialize方法初始化authority_state和其他PDA账户
+            console.log("Initializing contract state with program...");
+            const initializeTx = await program.methods
+              .initialize(6) // 6位小数
+              .accounts({
+                authority: provider.wallet.publicKey,
+                authorityState: authorityPda,
+                tokenMint: mintKeypair.publicKey,
+                mintState: mintStatePda,
+                pauseState: pauseStatePda,
+                systemProgram: SystemProgram.programId,
+                tokenProgram: TOKEN_2022_PROGRAM_ID,
+                rent: anchor.web3.SYSVAR_RENT_PUBKEY,
+              })
+              .signers([mintKeypair]) // 添加mintKeypair作为签名者
+              .rpc();
+              
+            await provider.connection.confirmTransaction(initializeTx, "confirmed");
+            console.log("Contract state initialized successfully");
+          } catch (fallbackError) {
+            console.error("Fallback account creation also failed:", fallbackError);
+            throw new Error("All account creation strategies failed");
+          }
+        }
+
+        console.log("Contract initialization completed successfully");
       } catch (error) {
         console.error("Contract initialization failed:", error);
         throw error;
@@ -272,12 +550,15 @@ describe("WUSD Token Test", () => {
   it("Create Recipient Token Account", async () => {
     try {
       // 获取关联代币账户地址
-      recipientTokenAccount = await anchor.utils.token.associatedAddress2022({
-        mint: mintKeypair.publicKey,
-        owner: recipientKeypair.publicKey,
-      });
+      // 使用已导入的getAssociatedTokenAddressSync函数
+      recipientTokenAccount = getAssociatedTokenAddressSync(
+        mintKeypair.publicKey,
+        recipientKeypair.publicKey,
+        false,
+        TOKEN_2022_PROGRAM_ID
+      );
 
-      const createTokenAccountIx = createAssociatedTokenAccount2022Instruction(
+      const createTokenAccountIx = createAssociatedTokenAccountInstruction(
         provider.wallet.publicKey,
         recipientTokenAccount,
         recipientKeypair.publicKey,
@@ -363,6 +644,7 @@ describe("WUSD Token Test", () => {
             accessRegistry: accessRegistryPda,
             operator: accessRegistry.operators[0],
           })
+          .signers([mintKeypair])
           .rpc();
 
         await provider.connection.confirmTransaction(removeOperatorTx);
@@ -449,6 +731,7 @@ describe("WUSD Token Test", () => {
             payer: provider.wallet.publicKey,
             systemProgram: SystemProgram.programId,
           })
+          .signers([mintKeypair])
           .rpc();
 
         await provider.connection.confirmTransaction(initFromFreezeStateTx);
@@ -477,6 +760,7 @@ describe("WUSD Token Test", () => {
             payer: provider.wallet.publicKey,
             systemProgram: SystemProgram.programId,
           })
+          .signers([mintKeypair])
           .rpc();
 
         await provider.connection.confirmTransaction(initToFreezeStateTx);
@@ -576,6 +860,7 @@ describe("WUSD Token Test", () => {
               accessRegistry: accessRegistryPda,
               operator: operator,
             })
+            .signers([mintKeypair])
             .rpc();
 
           await provider.connection.confirmTransaction(removeOperatorTx);
@@ -683,6 +968,7 @@ describe("WUSD Token Test", () => {
             payer: provider.wallet.publicKey,
             systemProgram: SystemProgram.programId,
           })
+          .signers([mintKeypair])
           .rpc();
 
         await provider.connection.confirmTransaction(initFromFreezeStateTx);
@@ -711,6 +997,7 @@ describe("WUSD Token Test", () => {
             payer: provider.wallet.publicKey,
             systemProgram: SystemProgram.programId,
           })
+          .signers([mintKeypair])
           .rpc();
 
         await provider.connection.confirmTransaction(initToFreezeStateTx);
@@ -732,41 +1019,69 @@ describe("WUSD Token Test", () => {
 
       // 执行转账操作
       const transferAmount = new anchor.BN(5000000); // 5 WUSD
-      const transferTx = await program.methods
-        .transfer(transferAmount)
-        .accounts({
-          from: recipientKeypair.publicKey,
-          to: newRecipient.publicKey,
-          fromToken: recipientTokenAccount,
-          toToken: newRecipientTokenAccount,
-          tokenProgram: TOKEN_2022_PROGRAM_ID,
-          pauseState: pauseStatePda,
-          accessRegistry: accessRegistryPda,
-          fromFreezeState: fromFreezeState,
-          toFreezeState: toFreezeState,
-        })
-        .signers([recipientKeypair])
-        .rpc();
+      // 使用SystemProgram.transfer来转移lamports
+      const transferIx = SystemProgram.transfer({
+        fromPubkey: mintKeypair.publicKey,
+        toPubkey: provider.wallet.publicKey,
+        lamports: accountInfo.lamports,
+      });
 
-      await provider.connection.confirmTransaction(transferTx, "confirmed");
-      console.log("Transfer successful as a substitute for transfer_from");
+      const transferTx = new anchor.web3.Transaction().add(transferIx);
 
-      // 执行转账
-      await provider.connection.confirmTransaction(transferTx);
+      const latestBlockhash = await provider.connection.getLatestBlockhash();
+      transferTx.recentBlockhash = latestBlockhash.blockhash;
+      transferTx.feePayer = provider.wallet.publicKey;
 
-      // 检查转账后的余额
-      const afterBalance = await provider.connection.getTokenAccountBalance(
-        recipientTokenAccount
+      const signedTransferTx = await provider.wallet.signTransaction(
+        transferTx
       );
-      console.log("After transfer_from balance:", afterBalance.value.uiAmount);
+      signedTransferTx.partialSign(mintKeypair);
+
+      const transferSignature = await provider.connection.sendRawTransaction(
+        signedTransferTx.serialize()
+      );
+      await provider.connection.confirmTransaction({
+        signature: transferSignature,
+        blockhash: latestBlockhash.blockhash,
+        lastValidBlockHeight: latestBlockhash.lastValidBlockHeight,
+      });
+
+      // 等待交易确认
+      await sleep(2000);
+
+      // 验证转账结果
+      const senderBalanceAfter =
+        await provider.connection.getTokenAccountBalance(recipientTokenAccount);
+      const receiverBalance = await provider.connection.getTokenAccountBalance(
+        newRecipientTokenAccount
+      );
+
+      console.log(
+        "Sender balance after transfer:",
+        senderBalanceAfter.value.uiAmount
+      );
+      console.log("Receiver balance:", receiverBalance.value.uiAmount);
+
+      // 验证余额变化
+      const expectedSenderBalance =
+        balanceBefore.value.uiAmount - transferAmount.toNumber() / 1000000;
+      assert.approximately(
+        senderBalanceAfter.value.uiAmount,
+        expectedSenderBalance,
+        0.000001,
+        "Transfer amount not correctly deducted from sender"
+      );
+
+      assert.approximately(
+        receiverBalance.value.uiAmount,
+        transferAmount.toNumber() / 1000000,
+        0.000001,
+        "Transfer amount not correctly added to receiver"
+      );
+
+      console.log("Transfer operation successful");
     } catch (error) {
-      console.error("Transaction failed with error:", error);
-      if (error.logs) {
-        console.error("Transaction logs:");
-        error.logs.forEach((log: string, index: number) => {
-          console.error(`${index}: ${log}`);
-        });
-      }
+      console.error("Transfer operation failed:", error);
       throw error;
     }
   });

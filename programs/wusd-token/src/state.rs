@@ -1,5 +1,6 @@
 use anchor_lang::prelude::*;
-use crate::{AccessLevel, error::WusdError};
+use crate::access::AccessLevel;
+use crate::error::WusdError;
 
 /// 授权额度状态账户，存储代币授权信息
 #[account]

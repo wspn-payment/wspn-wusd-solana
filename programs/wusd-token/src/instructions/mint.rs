@@ -45,9 +45,9 @@ pub struct MintAccounts<'info> {
     #[account(mut)]
     pub authority: Signer<'info>,
     #[account(mut)]
-    pub token_mint: Account<'info, anchor_spl::token::Mint>,
+    pub token_mint: InterfaceAccount<'info, anchor_spl::token_interface::Mint>,
     #[account(mut)]
-    pub token_account: Account<'info, anchor_spl::token::TokenAccount>,
+    pub token_account: InterfaceAccount<'info, anchor_spl::token_interface::TokenAccount>,
     pub token_program: Program<'info, Token2022>,
     #[account(mut)]
     pub authority_state: Account<'info, AuthorityState>,

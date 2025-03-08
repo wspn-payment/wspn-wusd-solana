@@ -1,16 +1,15 @@
 //! WUSD Token 程序 
 use anchor_lang::prelude::*;
-use anchor_spl::token_2022;
-use anchor_spl::token_interface::Token2022;
-use anchor_spl::token::Mint;
-use spl_token_2022::instruction::AuthorityType;  
-use anchor_spl::token_2022::ID as TOKEN_2022_PROGRAM_ID;
-
+use anchor_spl::token_2022; 
+use anchor_spl::token_interface::Mint;
+use anchor_spl::token_2022::ID as TOKEN_PROGRAM_ID;
+use spl_token_2022::instruction::AuthorityType;   
 
 mod instructions; 
 mod error;
 mod state; 
 mod utils;
+mod access;
 
 use state::{AuthorityState, MintState, PauseState, AccessRegistryState};
 
@@ -140,8 +139,7 @@ pub mod wusd_token {
     /// 解冻账户
     pub fn unfreeze_account(ctx: Context<UnfreezeAccount>) -> Result<()> {
         instructions::freeze::unfreeze_account(ctx) 
-    }
-
+    } 
 }
 
 #[derive(Accounts)]
@@ -167,10 +165,9 @@ pub struct Initialize<'info> {
         payer = authority,
         mint::decimals = decimals,
         mint::authority = authority.key(),
-        owner = TOKEN_2022_PROGRAM_ID
+        owner = TOKEN_PROGRAM_ID
     )]
-    pub token_mint: Account<'info, Mint>,
-
+    pub token_mint: InterfaceAccount<'info, Mint>,
     /// 铸币状态账户
     #[account(
         init,
@@ -191,7 +188,7 @@ pub struct Initialize<'info> {
     )]
     pub pause_state: Account<'info, PauseState>,
     pub system_program: Program<'info, System>,
-    pub token_program: Program<'info, Token2022>,
+    pub token_program: Program<'info, anchor_spl::token_2022::Token2022>,
     pub rent: Sysvar<'info, Rent>,
 }   
 
@@ -208,26 +205,12 @@ pub struct InitializeAccessRegistry<'info> {
         bump
     )]
     pub access_registry: Account<'info, AccessRegistryState>,
-
     pub system_program: Program<'info, System>,
-}   
+}
 
-/// 访问级别枚举，用于控制账户的操作权限
-#[derive(Clone, Copy, PartialEq, Eq)]
-pub enum AccessLevel {
-    /// 允许扣款操作，如转出、销毁等
-    Debit,
-    /// 允许入账操作，如接收转账、铸币等
-    Credit,
-}  
-
-/// 初始化事件，记录代币初始化的关键信息
 #[event]
 pub struct InitializeEvent {
-    /// 管理员地址，负责合约的权限管理
     pub authority: Pubkey,
-    /// 代币铸币权地址，用于控制代币的发行
     pub mint: Pubkey,
-    /// 代币精度，定义代币的最小单位
     pub decimals: u8,
 }
