@@ -13,7 +13,10 @@ pub fn transfer(ctx: Context<Transfer>, amount: u64) -> Result<()> {
     ctx.accounts.pause_state.validate_not_paused()?;
     require!(amount > 0, WusdError::InvalidAmount);
     // 检查冻结状态
-    require!(!ctx.accounts.from_token.is_frozen(), WusdError::AccountFrozen);
+    require!(
+        !ctx.accounts.from_token.is_frozen(),
+        WusdError::AccountFrozen
+    );
     require!(!ctx.accounts.to_token.is_frozen(), WusdError::AccountFrozen);
 
     // 检查访问权限
@@ -82,7 +85,10 @@ pub fn transfer_from(ctx: Context<TransferFrom>, amount: u64) -> Result<()> {
     )?;
 
     // 检查冻结状态
-    require!(!ctx.accounts.from_token.is_frozen(), WusdError::AccountFrozen);
+    require!(
+        !ctx.accounts.from_token.is_frozen(),
+        WusdError::AccountFrozen
+    );
     require!(!ctx.accounts.to_token.is_frozen(), WusdError::AccountFrozen);
 
     // 生成 PDA 签名
@@ -200,6 +206,18 @@ pub struct Transfer<'info> {
         bump
     )]
     pub access_registry: Account<'info, AccessRegistryState>,
+    #[account(
+        seeds = [b"freeze", from_token.key().as_ref()],
+        bump,
+        constraint = !from_freeze_state.is_frozen @ WusdError::AccountFrozen
+    )]
+    pub from_freeze_state: Account<'info, FreezeState>,
+    #[account(
+        seeds = [b"freeze", to_token.key().as_ref()],
+        bump,
+        constraint = !to_freeze_state.is_frozen @ WusdError::AccountFrozen
+    )]
+    pub to_freeze_state: Account<'info, FreezeState>,
 }
 
 #[event]
