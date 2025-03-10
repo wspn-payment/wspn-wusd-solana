@@ -82,6 +82,54 @@ pub mod wusd_token {
         Ok(())
     } 
     
+    /// 初始化PDA账户，用于已存在的mint账户
+    pub fn initialize_pda_only(ctx: Context<InitializePdaOnly>, decimals: u8) -> Result<()> {
+        msg!("Starting PDA-only initialization...");
+        msg!("Authority: {}", ctx.accounts.authority.key());
+        msg!("Mint: {}", ctx.accounts.token_mint.key());
+
+        // 1. 初始化状态账户
+        let authority_state = &mut ctx.accounts.authority_state;
+        authority_state.admin = ctx.accounts.authority.key();
+        authority_state.minter = ctx.accounts.authority.key();
+        authority_state.pauser = ctx.accounts.authority.key();
+
+        let mint_state = &mut ctx.accounts.mint_state;
+        mint_state.mint = ctx.accounts.token_mint.key();
+        mint_state.decimals = decimals;
+
+        let pause_state = &mut ctx.accounts.pause_state;
+        pause_state.paused = false;
+
+        // 2. 转移mint的authority给authority_state PDA
+        let mint_key = ctx.accounts.token_mint.key();
+        let seeds = &[b"authority", mint_key.as_ref()]; 
+        let (_authority_pda, bump) = Pubkey::find_program_address(seeds, ctx.program_id);
+        let _bump_bytes = &[bump];
+
+        token_2022::set_authority(
+            CpiContext::new(
+                ctx.accounts.token_program.to_account_info(),
+                token_2022::SetAuthority {
+                    current_authority: ctx.accounts.authority.to_account_info(),
+                    account_or_mint: ctx.accounts.token_mint.to_account_info(),
+                }
+            ),
+            AuthorityType::MintTokens,
+            Some(ctx.accounts.authority_state.key()),
+        )?;
+
+        // 3. 发出初始化事件
+        emit!(InitializeEvent {
+            authority: ctx.accounts.authority.key(),
+            mint: ctx.accounts.token_mint.key(),
+            decimals
+        });
+
+        msg!("PDA-only initialization completed successfully");
+        Ok(())
+    }
+    
     /// 铸造WUSD代币 
     pub fn mint(ctx: Context<MintAccounts>, amount: u64, bump: u8) -> Result<()> {
         instructions::mint::mint(ctx, amount, bump) 
@@ -144,7 +192,7 @@ pub mod wusd_token {
 
 #[derive(Accounts)]
 #[instruction(decimals: u8)]
-pub struct Initialize<'info> {
+pub struct InitializePdaOnly<'info> {
     /// 管理员账户
     #[account(mut)]
     pub authority: Signer<'info>,
@@ -159,15 +207,13 @@ pub struct Initialize<'info> {
     )]
     pub authority_state: Account<'info, AuthorityState>,
 
-    /// 代币铸币账户 
+    /// 代币铸币账户 - 注意这里不使用init约束，因为账户已经存在
     #[account(
-        init,
-        payer = authority,
-        mint::decimals = decimals,
-        mint::authority = authority.key(),
+        mut,
         owner = TOKEN_PROGRAM_ID
     )]
     pub token_mint: InterfaceAccount<'info, Mint>,
+    
     /// 铸币状态账户
     #[account(
         init,
@@ -191,6 +237,57 @@ pub struct Initialize<'info> {
     pub token_program: Program<'info, anchor_spl::token_2022::Token2022>,
     pub rent: Sysvar<'info, Rent>,
 }   
+
+#[derive(Accounts)]
+#[instruction(decimals: u8)]
+pub struct Initialize<'info> {
+    /// 管理员账户
+    #[account(mut)]
+    pub authority: Signer<'info>,
+
+    /// 权限管理账户
+    #[account(
+        init,
+        payer = authority, 
+        space = AuthorityState::SIZE,
+        seeds = [b"authority", token_mint.key().as_ref()],
+        bump
+    )]
+    pub authority_state: Account<'info, AuthorityState>,
+
+    /// 代币铸币账户
+    #[account(
+        init,
+        payer = authority,
+        mint::decimals = decimals,
+        mint::authority = authority.key(),
+        owner = TOKEN_PROGRAM_ID
+    )]
+    pub token_mint: InterfaceAccount<'info, Mint>,
+    
+    /// 铸币状态账户
+    #[account(
+        init,
+        payer = authority, 
+        space = MintState::SIZE,
+        seeds = [b"mint_state", token_mint.key().as_ref()],
+        bump
+    )]
+    pub mint_state: Account<'info, MintState>,
+
+    /// 暂停状态账户
+    #[account(
+        init,
+        payer = authority, 
+        space = PauseState::SIZE,
+        seeds = [b"pause_state", token_mint.key().as_ref()],
+        bump
+    )]
+    pub pause_state: Account<'info, PauseState>,
+    pub system_program: Program<'info, System>,
+    pub token_program: Program<'info, anchor_spl::token_2022::Token2022>,
+    pub rent: Sysvar<'info, Rent>,
+}
 
 #[derive(Accounts)]
 pub struct InitializeAccessRegistry<'info> {

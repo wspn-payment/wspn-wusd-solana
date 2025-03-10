@@ -92,13 +92,14 @@ pub fn transfer_from(ctx: Context<TransferFrom>, amount: u64) -> Result<()> {
     require!(!ctx.accounts.to_token.is_frozen(), WusdError::AccountFrozen);
 
     // 生成 PDA 签名
+    let bump = ctx.accounts.permit.bump;
     let owner_key = ctx.accounts.owner.key();
     let spender_key = ctx.accounts.spender.key();
     let seeds = &[
         b"permit",
         owner_key.as_ref(),
         spender_key.as_ref(),
-        &[ctx.accounts.permit.bump],
+        &[bump],
     ];
 
     // 执行代币转账
@@ -109,7 +110,7 @@ pub fn transfer_from(ctx: Context<TransferFrom>, amount: u64) -> Result<()> {
                 from: ctx.accounts.from_token.to_account_info(),
                 mint: ctx.accounts.token_mint.to_account_info(),
                 to: ctx.accounts.to_token.to_account_info(),
-                authority: ctx.accounts.permit.to_account_info(),
+                authority: ctx.accounts.permit.to_account_info(), // 使用permit PDA作为authority
             },
             &[&seeds[..]],
         ),
