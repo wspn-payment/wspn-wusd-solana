@@ -91,28 +91,17 @@ pub fn transfer_from(ctx: Context<TransferFrom>, amount: u64) -> Result<()> {
     );
     require!(!ctx.accounts.to_token.is_frozen(), WusdError::AccountFrozen);
 
-    // 生成 PDA 签名
-    let bump = ctx.accounts.permit.bump;
-    let owner_key = ctx.accounts.owner.key();
-    let spender_key = ctx.accounts.spender.key();
-    let seeds = &[
-        b"permit",
-        owner_key.as_ref(),
-        spender_key.as_ref(),
-        &[bump],
-    ];
-
-    // 执行代币转账
+    // 直接使用spender作为authority执行转账
+    // 不再尝试使用PDA签名，而是使用标准的Token2022 approve/transfer机制
     transfer_checked(
-        CpiContext::new_with_signer(
+        CpiContext::new(
             ctx.accounts.token_program.to_account_info(),
             token_2022::TransferChecked {
                 from: ctx.accounts.from_token.to_account_info(),
                 mint: ctx.accounts.token_mint.to_account_info(),
                 to: ctx.accounts.to_token.to_account_info(),
-                authority: ctx.accounts.permit.to_account_info(), // 使用permit PDA作为authority
-            },
-            &[&seeds[..]],
+                authority: ctx.accounts.spender.to_account_info(), // 使用spender作为authority
+            }
         ),
         amount,
         6, // 使用固定的小数位数
@@ -199,12 +188,11 @@ pub struct Transfer<'info> {
     #[account(
         seeds = [b"pause_state", from_token.mint.as_ref()],
         bump,
-        constraint = !pause_state.paused @ WusdError::ContractPaused
     )]
     pub pause_state: Account<'info, PauseState>,
     #[account(
         seeds = [b"access_registry"],
-        bump
+        bump,
     )]
     pub access_registry: Account<'info, AccessRegistryState>,
     #[account(
@@ -223,18 +211,10 @@ pub struct Transfer<'info> {
 
 #[event]
 pub struct TransferEvent {
-    #[index]
-    /// 转出地址
     pub from: Pubkey,
-    #[index]
-    /// 转入地址
     pub to: Pubkey,
-    /// 转账金额
     pub amount: u64,
-    /// 手续费
     pub fee: u64,
-    /// 交易时间戳
     pub timestamp: i64,
-    /// 转账备注（可选）
     pub memo: Option<String>,
 }

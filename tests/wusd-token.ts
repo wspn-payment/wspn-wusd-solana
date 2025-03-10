@@ -12,6 +12,7 @@ import {
   createInitializeMint2Instruction,
   createAssociatedTokenAccountInstruction,
   getAssociatedTokenAddressSync,
+  createApproveInstruction,
 } from "@solana/spl-token";
 import { WusdToken } from "../target/types/wusd_token";
 import { assert } from "chai";
@@ -957,6 +958,29 @@ describe("WUSD Token Test", () => {
       // 执行transfer_from操作
       const transferAmount = new anchor.BN(5000000); // 5 WUSD
       try {
+        // 在执行transfer_from之前，先使用标准的SPL Token approve指令授权spender
+        const approveIx = createApproveInstruction(
+          recipientTokenAccount,
+          spender.publicKey,
+          recipientKeypair.publicKey,
+          transferAmount.toNumber(),
+          [],
+          TOKEN_2022_PROGRAM_ID
+        );
+
+        // 先执行approve指令
+        const approveTx = new anchor.web3.Transaction().add(approveIx);
+        const approveSignature = await provider.connection.sendTransaction(
+          approveTx,
+          [recipientKeypair]
+        );
+        await provider.connection.confirmTransaction(approveSignature, "confirmed");
+        console.log("Approve transaction confirmed:", approveSignature);
+
+        // 等待一段时间确保approve生效
+        await sleep(2000);
+
+        // 然后执行transfer_from
         const transferFromTx = await program.methods
           .transferFrom(transferAmount)
           .accounts({
@@ -974,7 +998,7 @@ describe("WUSD Token Test", () => {
             toFreezeState: toFreezeState,
             systemProgram: SystemProgram.programId,
           })
-          .signers([spender])
+          .signers([spender]) // 只使用spender作为签名者
           .rpc();
 
         await provider.connection.confirmTransaction(
@@ -1014,10 +1038,12 @@ describe("WUSD Token Test", () => {
           "Transfer amount not correctly added to receiver"
         );
       } catch (error) {
-        console.log("Transfer_from operation failed:", error);
+        console.error("Transfer_from operation failed:", error);
+        throw error;
       }
     } catch (error) {
-      console.log("Transfer_from failed:", error);
+      console.error("Transfer_from failed:", error);
+      throw error;
     }
   });
 
@@ -1025,7 +1051,7 @@ describe("WUSD Token Test", () => {
     try {
       // 添加销毁权限
       const tx = await program.methods
-        .addOperator(recipientKeypair.publicKey) // 为recipientKeypair添加操作员权限
+        .addOperator(recipientKeypair.publicKey) 
         .accounts({
           authority: provider.wallet.publicKey,
           authorityState: authorityPda,
