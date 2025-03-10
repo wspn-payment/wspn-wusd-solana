@@ -1,6 +1,6 @@
 # 简介
 
-这是一个基于 Anchor 框架实现的 Solana 稳定币合约
+这是一个基于Anchor框架实现的WSPN的Solana稳定币(WUSD)的智能合约
 
 ## 开发环境要求
 
