@@ -460,7 +460,7 @@ describe("WUSD Token Test", () => {
 
       // 执行铸币操作
       const tx = await program.methods
-        .mint(new anchor.BN(9000000000), authorityBump)
+        .mint(new anchor.BN(10000000000), authorityBump)
         .accounts({
           authority: provider.wallet.publicKey,
           tokenMint: mintKeypair.publicKey,
