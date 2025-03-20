@@ -64,37 +64,19 @@ describe("WUSD Token Test", () => {
       console.log("Generated keypairs:");
       console.log("Mint keypair:", mintKeypair.publicKey.toString());
       console.log("Recipient keypair:", recipientKeypair.publicKey.toString());
+      
+      // 检查连接是否正确指向devnet
+      const endpoint = provider.connection.rpcEndpoint;
+      console.log("Connected to:", endpoint);
+      if (!endpoint.includes("devnet")) {
+        console.warn("Warning: Not connected to devnet! Current endpoint:", endpoint);
+      }
 
-      // 2. 为账户请求空投并确认
-      const mintAirdropSig = await provider.connection.requestAirdrop(
-        provider.wallet.publicKey, // 只给钱包账户空投，不给mint账户空投
-        10 * LAMPORTS_PER_SOL
-      );
-      const recipientAirdropSig = await provider.connection.requestAirdrop(
-        recipientKeypair.publicKey,
-        10 * LAMPORTS_PER_SOL
-      );
-
-      const { blockhash, lastValidBlockHeight } =
-        await provider.connection.getLatestBlockhash({
-          commitment: "confirmed",
-        });
-
-      await provider.connection.confirmTransaction({
-        signature: mintAirdropSig,
-        blockhash,
-        lastValidBlockHeight,
-      });
-
-      await provider.connection.confirmTransaction({
-        signature: recipientAirdropSig,
-        blockhash,
-        lastValidBlockHeight,
-      });
-
-      // 等待确认完成
-      await sleep(2000);
-
+      // 2. 跳过空投步骤，在devnet上使用已有的SOL
+      console.log("Skipping airdrop on devnet - please ensure your wallet already has SOL");
+      console.log("Wallet address:", provider.wallet.publicKey.toString());
+      console.log("Recipient address:", recipientKeypair.publicKey.toString());
+    
       // 3. 计算 PDA 地址
       console.log("Calculating PDA addresses...");
       // 使用显式定义的programId，因为program.programId可能未定义
@@ -508,17 +490,10 @@ describe("WUSD Token Test", () => {
 
   it("Transfer WUSD tokens", async () => {
     try {
-      // 为 recipientKeypair 请求空投
-      const airdropSignature = await provider.connection.requestAirdrop(
-        recipientKeypair.publicKey,
-        10 * LAMPORTS_PER_SOL // 空投 10 SOL
-      );
-      await provider.connection.confirmTransaction(
-        airdropSignature,
-        "confirmed"
-      );
-      console.log("Airdropped SOL to recipient");
-      await sleep(1000); // 等待空投确认
+      // 跳过为 recipientKeypair 请求空投，在devnet上使用已有的SOL
+      console.log("Skipping airdrop to recipient on devnet - please ensure your wallet already has SOL");
+      console.log("Recipient address:", recipientKeypair.publicKey.toString());
+      await sleep(1000); // 等待一下以确保连接稳定
 
       // 检查当前操作员列表
       const accessRegistry = await program.account.accessRegistryState.fetch(
@@ -720,16 +695,9 @@ describe("WUSD Token Test", () => {
 
   it("Test transfer_from functionality", async () => {
     try {
-      // 为 recipientKeypair 请求空投
-      const airdropSignature = await provider.connection.requestAirdrop(
-        recipientKeypair.publicKey,
-        10 * LAMPORTS_PER_SOL // 空投 10 SOL
-      );
-      await provider.connection.confirmTransaction(
-        airdropSignature,
-        "confirmed"
-      );
-      console.log("Airdropped SOL to recipient");
+      // 跳过为 recipientKeypair 请求空投，在devnet上使用已有的SOL
+      console.log("Skipping airdrop to recipient on devnet - please ensure your wallet already has SOL");
+      console.log("Recipient address:", recipientKeypair.publicKey.toString());
 
       // 检查当前操作员列表
       const accessRegistry = await program.account.accessRegistryState.fetch(
@@ -778,16 +746,31 @@ describe("WUSD Token Test", () => {
       console.log("Added spender as operator");
       await sleep(1000);
 
-      // 为spender账户请求空投
-      const spenderAirdropSig = await provider.connection.requestAirdrop(
-        spender.publicKey,
-        5 * LAMPORTS_PER_SOL
+      // 为spender账户和recipient账户转账一些SOL以支付账户创建费用
+      console.log("Transferring SOL to spender and recipient for account creation fees");
+      console.log("Spender address:", spender.publicKey.toString());
+      
+      // 转账SOL给spender账户
+      const transferToSpenderTx = new anchor.web3.Transaction().add(
+        SystemProgram.transfer({
+          fromPubkey: provider.wallet.publicKey,
+          toPubkey: spender.publicKey,
+          lamports: LAMPORTS_PER_SOL * 0.1, // 转0.1 SOL
+        })
       );
-      await provider.connection.confirmTransaction(
-        spenderAirdropSig,
-        "confirmed"
+      await provider.sendAndConfirm(transferToSpenderTx);
+      
+      // 转账SOL给recipient账户
+      const transferToRecipientTx = new anchor.web3.Transaction().add(
+        SystemProgram.transfer({
+          fromPubkey: provider.wallet.publicKey,
+          toPubkey: recipientKeypair.publicKey,
+          lamports: LAMPORTS_PER_SOL * 0.1, // 转0.1 SOL
+        })
       );
-      console.log("Airdropped SOL to spender");
+      await provider.sendAndConfirm(transferToRecipientTx);
+      
+      console.log("SOL transferred to spender and recipient accounts");
 
       // 创建接收账户的代币账户
       const toTokenAccount = getAssociatedTokenAddressSync(

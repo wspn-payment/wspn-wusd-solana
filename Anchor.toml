@@ -12,7 +12,7 @@ wusd_token = "8nBbkdsTkqbrnrbVTUxyciQNvT6Q5B3pZkPQmP3nnuwU"
 url = "https://api.apr.dev"
 
 [provider]
-cluster = "http://localhost:8899"
+cluster = "https://api.devnet.solana.com"
 wallet = "./deploy-keypair.json"
 
 [workspace]
